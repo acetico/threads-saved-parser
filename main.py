@@ -4,6 +4,7 @@ from threads_utils import parse_thread
 from parsel import Selector
 import os
 import re
+import chardet
 
 app = FastAPI()
 
@@ -23,15 +24,22 @@ def thread_api(url: str = Query(...)):
     )
     result = SCRAPFLY.scrape(config)
 
+    # 1. Пробуем JSON
     content_json = result.result.get("content_json")
     if content_json:
         return parse_thread(content_json)
 
-    # ⛔ Fallback: HTML-парсинг
-    html = result.content
+    # 2. Fallback: HTML
+    raw_html = result.result.get("content", b"")
+    if isinstance(raw_html, bytes):
+        # Попробуем угадать кодировку
+        detected = chardet.detect(raw_html)
+        html = raw_html.decode(detected["encoding"] or "utf-8", errors="ignore")
+    else:
+        html = raw_html  # уже строка
+
     selector = Selector(text=html)
 
-    # Парсим видимые элементы
     text = selector.css('meta[property="og:description"]::attr(content)').get()
     author = selector.css('meta[property="og:title"]::attr(content)').get()
     image = selector.css('meta[property="og:image"]::attr(content)').get()
