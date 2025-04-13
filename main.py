@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Query, HTTPException
 from scrapfly import ScrapflyClient, ScrapeConfig
 from threads_utils import parse_thread
+from parsel import Selector
 import os
+import re
 
 app = FastAPI()
 
@@ -21,9 +23,26 @@ def thread_api(url: str = Query(...)):
     )
     result = SCRAPFLY.scrape(config)
 
-    # Пробуем достать JSON
     content_json = result.result.get("content_json")
-    if not content_json:
-        raise HTTPException(status_code=500, detail="Threads returned HTML instead of JSON. This post may require login or isn't public.")
+    if content_json:
+        return parse_thread(content_json)
 
-    return parse_thread(content_json)
+    # ⛔ Fallback: HTML-парсинг
+    html = result.content
+    selector = Selector(text=html)
+
+    # Парсим видимые элементы
+    text = selector.css('meta[property="og:description"]::attr(content)').get()
+    author = selector.css('meta[property="og:title"]::attr(content)').get()
+    image = selector.css('meta[property="og:image"]::attr(content)').get()
+    url = selector.css('meta[property="og:url"]::attr(content)').get()
+    timestamp_match = re.search(r'"publish_date":"([^"]+)"', html)
+    timestamp = timestamp_match.group(1) if timestamp_match else None
+
+    return {
+        "text": text or "No text found",
+        "author": author or "Unknown",
+        "image": image,
+        "url": url,
+        "published": timestamp
+    }
