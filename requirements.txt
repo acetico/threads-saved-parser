@@ -6,3 +6,4 @@ nested-lookup
 cerberus
 loguru
 scrapfly-sdk
+parsel
