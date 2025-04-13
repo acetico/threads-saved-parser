@@ -21,9 +21,9 @@ def thread_api(url: str = Query(...)):
     )
     result = SCRAPFLY.scrape(config)
 
-    try:
-        json_data = result.result["content_json"]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse thread JSON: {e}")
+    # Пробуем достать JSON
+    content_json = result.result.get("content_json")
+    if not content_json:
+        raise HTTPException(status_code=500, detail="Threads returned HTML instead of JSON. This post may require login or isn't public.")
 
-    return parse_thread(json_data)
+    return parse_thread(content_json)
