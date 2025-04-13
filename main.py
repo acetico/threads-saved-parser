@@ -32,11 +32,12 @@ def extract_posts_from_thread(main_url: str):
     main_sel = Selector(text=main_html)
 
     # 2. Получаем имя автора
-    author = main_sel.css('meta[property="og:title"]::attr(content)').get()
-    if not author:
-        raise HTTPException(status_code=500, detail="Author not found in thread")
-
-    base_username = re.findall(r'@([^/]+)/post', main_url)[0]
+    canonical_url = main_sel.css('link[rel="canonical"]::attr(href)').get()
+    match = re.search(r'threads.net/@([^/]+)/post', canonical_url or main_url)
+    if not match:
+        raise HTTPException(status_code=500, detail="Unable to extract username")
+    base_username = match.group(1)
+    author = f"@{base_username}"
 
     def extract_text_and_media(sel: Selector):
         text = sel.css('meta[property="og:description"]::attr(content)').get()
