@@ -41,7 +41,12 @@ def extract_posts_from_thread(main_url: str):
 
     def extract_text_and_media(sel: Selector):
         text = sel.css('meta[property="og:description"]::attr(content)').get()
+        # Альтернативный способ — через видимые div
+        if not text:
+            text = " ".join(sel.css('div[dir="auto"]::text').getall()).strip()
         image = sel.css('meta[property="og:image"]::attr(content)').get()
+        if not image:
+            image = sel.css('img::attr(src)').get()
         return {
             "text": text or "",
             "media": [image] if image else []
