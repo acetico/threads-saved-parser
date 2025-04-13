@@ -1,21 +1,15 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.responses import JSONResponse
 from scrapfly import ScrapflyClient, ScrapeConfig
-from threads_utils import parse_thread
 from parsel import Selector
 import os
 import re
 import chardet
 
 app = FastAPI()
-
 SCRAPFLY = ScrapflyClient(key=os.environ["SCRAPFLY_KEY"])
 
-@app.get("/")
-def root():
-    return {"message": "Threads Scraper is working"}
-
-@app.get("/thread")
-def thread_api(url: str = Query(...)):
+def fetch_html(url: str) -> str:
     config = ScrapeConfig(
         url=url,
         asp=True,
@@ -23,34 +17,75 @@ def thread_api(url: str = Query(...)):
         render_js=True
     )
     result = SCRAPFLY.scrape(config)
-
-    # 1. Пробуем JSON
-    content_json = result.result.get("content_json")
-    if content_json:
-        return parse_thread(content_json)
-
-    # 2. Fallback: HTML
     raw_html = result.result.get("content", b"")
     if isinstance(raw_html, bytes):
-        # Попробуем угадать кодировку
         detected = chardet.detect(raw_html)
-        html = raw_html.decode(detected["encoding"] or "utf-8", errors="ignore")
-    else:
-        html = raw_html  # уже строка
+        return raw_html.decode(detected["encoding"] or "utf-8", errors="ignore")
+    return raw_html
 
-    selector = Selector(text=html)
+def extract_posts_from_thread(main_url: str):
+    visited_urls = set()
+    collected_posts = []
 
-    text = selector.css('meta[property="og:description"]::attr(content)').get()
-    author = selector.css('meta[property="og:title"]::attr(content)').get()
-    image = selector.css('meta[property="og:image"]::attr(content)').get()
-    url = selector.css('meta[property="og:url"]::attr(content)').get()
-    timestamp_match = re.search(r'"publish_date":"([^"]+)"', html)
-    timestamp = timestamp_match.group(1) if timestamp_match else None
+    # 1. Загрузка главной страницы
+    main_html = fetch_html(main_url)
+    main_sel = Selector(text=main_html)
+
+    # 2. Получаем имя автора
+    author = main_sel.css('meta[property="og:title"]::attr(content)').get()
+    if not author:
+        raise HTTPException(status_code=500, detail="Author not found in thread")
+
+    base_username = re.findall(r'@([^/]+)/post', main_url)[0]
+
+    def extract_text_and_media(sel: Selector):
+        text = sel.css('meta[property="og:description"]::attr(content)').get()
+        image = sel.css('meta[property="og:image"]::attr(content)').get()
+        return {
+            "text": text or "",
+            "media": [image] if image else []
+        }
+
+    # 3. Собираем первый пост
+    first = extract_text_and_media(main_sel)
+    collected_posts.append(first)
+    visited_urls.add(main_url)
+
+    # 4. Находим все ссылки на продолжения
+    post_links = main_sel.css(f'a[href*="/@{base_username}/post/"]::attr(href)').getall()
+    post_links = [f"https://www.threads.net{link}" for link in post_links]
+    post_links = list(set(post_links) - visited_urls)
+
+    # 5. Загружаем остальные посты автора
+    for link in post_links:
+        visited_urls.add(link)
+        try:
+            html = fetch_html(link)
+            sel = Selector(text=html)
+            this_author = sel.css('meta[property="og:title"]::attr(content)').get()
+            if this_author != author:
+                continue  # Пропускаем чужие комментарии
+            post = extract_text_and_media(sel)
+            collected_posts.append(post)
+        except Exception as e:
+            continue
+
+    # 6. Объединение текста и медиа
+    all_texts = [p["text"] for p in collected_posts if p["text"]]
+    all_media = sum([p["media"] for p in collected_posts], [])
 
     return {
-        "text": text or "No text found",
-        "author": author or "Unknown",
-        "image": image,
-        "url": url,
-        "published": timestamp
+        "author": author,
+        "posts_count": len(collected_posts),
+        "text_full": "\n\n".join(all_texts),
+        "media_urls": all_media,
+        "source": main_url
     }
+
+@app.get("/thread")
+def thread_api(url: str = Query(...)):
+    try:
+        result = extract_posts_from_thread(url)
+        return JSONResponse(content=result, media_type="application/json; charset=utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
