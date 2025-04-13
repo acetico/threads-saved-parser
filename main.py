@@ -1,4 +1,4 @@
-from threads_utils import Threads
+from threads_utils import get_threads
 from fastapi import FastAPI, Query
 
 app = FastAPI()
@@ -8,7 +8,5 @@ def root():
     return {"message": "Threads Scraper is working"}
 
 @app.get("/thread")
-def get_thread(url: str = Query(...)):
-    t = Threads()
-    thread = t.get_thread(url)
-    return thread
+def thread_api(url: str = Query(...)):
+    return get_thread(url)
