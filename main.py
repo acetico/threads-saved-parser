@@ -14,7 +14,7 @@ def fetch_html(url: str) -> str:
         url=url,
         asp=True,
         country="US",
-        render_js=True
+        render_js=True,
         wait_for_selector="div[dir='auto']"  # ⏳ ждём появления текста поста
     )
     result = SCRAPFLY.scrape(config)
