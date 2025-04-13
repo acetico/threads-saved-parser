@@ -1,4 +1,4 @@
-from threads import Threads
+from threads_utils import Threads
 from fastapi import FastAPI, Query
 
 app = FastAPI()
